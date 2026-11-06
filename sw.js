@@ -2,7 +2,7 @@
 // Strategy: serve from cache instantly, refresh the cache from the network in the background.
 // => After you publish an update, open the app, then close and reopen it to see the new version.
 // Bump CACHE whenever you change the list of files below.
-const CACHE = 'gym-tracker-v1';
+const CACHE = 'gym-tracker-v1.1';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './db.js', './seed.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png'
