@@ -4,7 +4,7 @@
 //   * State lives in the object S, and is saved to IndexedDB via DB (db.js).
 //   * Each screen is a function in VIEWS that returns an HTML string; render() draws the current one.
 //   * Buttons have data-act="name" -> handled by ACT.name. Inputs have data-ch="name" -> CH.name (on change).
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.1.1';
 
 // ---------- small helpers ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -395,6 +395,9 @@ const VIEWS = {
         </div></div>
       <div class="card"><div class="h3">Programs</div>
         <button class="btn block" data-act="addSample">Add the sample 3-day program again</button></div>
+      <div class="card"><div class="h3">App updates</div>
+        <p class="muted small">Pulls the latest version from the web. Your logged data is not affected.</p>
+        <button class="btn block" data-act="checkUpdate">Check for updates now</button></div>
       <p class="muted small center">Gym Tracker v${APP_VERSION}</p>`;
   },
 };
@@ -790,6 +793,15 @@ const ACT = {
       try { await navigator.share({ files: [file], title: 'Gym Tracker backup' }); await markBackedUp(); rerender(); }
       catch (e) { if (e.name !== 'AbortError') toast('Sharing failed — try Download instead'); }
     } else { ACT.exportJson(); }
+  },
+  async checkUpdate() {
+    if (!navigator.onLine) { toast('You are offline — try again with a connection'); return; }
+    if (S.draft) save.draft();
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) await reg.update().catch(() => {});
+    // throw away the saved app files (NOT your data — that lives in IndexedDB) and reload fresh
+    if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+    location.reload();
   },
   exportCsv: () => download(`gym-sets-${stamp()}.csv`, toCsv(), 'text/csv'),
   importClick: () => $('#importInput').click(),
