@@ -162,3 +162,29 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   box-shadow: 0 6px 24px rgba(0,0,0,.4); max-width: 90vw; text-align: center;
 }
 #toast[hidden] { display: none; }
+
+/* ----- v1.1 workout additions ----- */
+.wk-sticky {
+  position: sticky; top: 0; z-index: 9; display: flex; align-items: center; gap: 8px;
+  margin: 0 -14px 10px; padding: calc(8px + env(safe-area-inset-top)) 14px 8px;
+  background: rgba(20, 22, 26, .96); border-bottom: 1px solid var(--line); backdrop-filter: blur(6px);
+}
+main:has(.wk-sticky) { padding-top: 0; }
+.wk-title { flex: 1; min-width: 0; }
+.ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ex-head { cursor: pointer; }
+.tgl { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin-left: 8px;
+  border-radius: 8px; background: var(--card2); font-weight: 800; font-size: 1.1rem; }
+.card.ex.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.card.ex.collapsed { padding: 10px 14px; }
+.set.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.set.failed { background: #3a1d1d; }
+.set.failed .tick { background: var(--danger); border-color: var(--danger); color: #fff; }
+.failbtn { width: 44px; height: 50px; flex: none; border-radius: 12px; border: 2px solid var(--line);
+  background: var(--bg); color: var(--danger); font-size: 1.2rem; font-weight: 900; cursor: pointer; }
+.set-stamp { font-size: .8rem; color: var(--muted); margin-top: 6px; }
+.set-stamp .short { color: var(--bo); font-weight: 700; }
+.repeat { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: .9rem; }
+.repeat span { flex: 1; color: #ffb3b3; }
+.chip.fail { border-left-color: var(--danger); color: #ffb3b3; }
+.chip.todo { opacity: .5; }

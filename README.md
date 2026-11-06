@@ -1,6 +1,15 @@
-# Gym Tracker (v1)
+# Gym Tracker (v1.1)
 
 A lightweight, offline gym program tracker. It runs as an installable web app (PWA) on your Android phone. Your data is stored on the phone itself.
+
+## What's new in v1.1
+- **Sticky header** at the top of the workout: shows "Up next: exercise · set", workout time, and a live **"since last set"** clock. The **↓ Next** button jumps back to your active set, or to Finish when everything is done.
+- **Active highlight:** the current exercise and set have a lime outline.
+- **Fail a set:** tap the red ✗ next to ✓. The set is saved as failed, and the app offers to **Repeat** it (it adds a copy of the set right below).
+- **Timestamps:** every ticked or failed set records its time. Each set shows "Done 19:42 · rest 2:41". The rest turns orange with ⚠️ when it's shorter than your rest-timer setting (warm-ups are ignored). Rest = time between finishing one set and finishing the next, so it includes how long the set itself took.
+- **Collapse:** an exercise rolls up to its heading once all its sets are done. Tap the heading or **+ / −** to open or close it.
+- **Reorder on the fly:** use **▶ Do next** on any later exercise (e.g. when equipment is busy), or **↓ Later** on the current one. The saved workout keeps the order you actually did.
+- History shows failed sets in red, plus the rest time on each set. The CSV export has new `failed`, `completed_at` and `rest_sec` columns.
 
 ## What's in v1
 - **Programs → days → exercises → sets.** Each set is a warm-up, working or back-off set, with either a fixed kg weight or a % of your max. Reps can be a range (8–10), and a set can have an RIR target or an AMRAP flag.
@@ -54,6 +63,8 @@ Then do step 4 from Option A. For future updates, run `git add . && git commit -
 4. Open the app from the new icon. It runs full-screen and works offline at the gym.
 
 **Getting updates:** after you push a change, open the app, close it, then open it again.
+
+**Updating from v1.0 to v1.1:** upload the changed files (`app.js`, `styles.css`, `sw.js`, `README.md`) to your repo, replacing the old ones. In GitHub's web upload, drag them in and commit. With git, `git add . && git commit -m "v1.1" && git push`. Your logged workouts stay on the phone and are kept. If you're halfway through a workout, it continues in the new version.
 
 ## ⚠️ Protect your data
 - Your data lives in Chrome's storage for this app. **Clearing Chrome's site data, or uninstalling Chrome, deletes it.**

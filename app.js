@@ -4,7 +4,7 @@
 //   * State lives in the object S, and is saved to IndexedDB via DB (db.js).
 //   * Each screen is a function in VIEWS that returns an HTML string; render() draws the current one.
 //   * Buttons have data-act="name" -> handled by ACT.name. Inputs have data-ch="name" -> CH.name (on change).
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 
 // ---------- small helpers ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -191,14 +191,22 @@ const VIEWS = {
   workout() {
     const d = S.draft;
     if (!d) return `<p class="muted">No workout in progress.</p><button class="btn" data-act="nav" data-v="home">Back to Train</button>`;
-    let h = `<div class="wk-head">
-      <div><div class="eyebrow">${esc(d.programName)}</div><h1>${esc(d.dayName)}</h1>
-      <div class="muted small">Started ${fmtTime(d.startedAt)} · <span id="elapsed">0:00</span></div></div>
-      <button class="btn icon" data-act="timerStart" title="Start rest timer">⏱</button></div>`;
-    h += d.entries.map((e, ei) => entryCard(e, ei)).join('');
-    h += `<label class="field"><span>Session notes</span><textarea data-in="notes" rows="3" placeholder="How did it feel?">${esc(d.notes)}</textarea></label>
+    const a = activeIdx(d);
+    const ae = a >= 0 ? d.entries[a] : null;
+    const as = ae ? ae.sets.find(s => !s.done) : null;
+    const cnt = {}; let tag = '';
+    if (ae) for (const s of ae.sets) { cnt[s.type] = (cnt[s.type] || 0) + 1; if (s === as) { tag = TYPE[s.type].short + cnt[s.type]; break; } }
+    const rests = restMap(d.entries);
+    let h = `<div class="wk-sticky">
+      <div class="wk-title"><div class="h3 ellipsis">${ae ? 'Up next: ' + esc(ae.name) + ' · ' + tag : 'All sets done 🎉'}</div>
+        <div class="muted small">⏱ <span id="elapsed">0:00</span> · since last set <b id="since">—</b></div></div>
+      <button class="btn sm primary" data-act="jumpNext">↓ ${ae ? 'Next' : 'Finish'}</button>
+      <button class="btn icon sm" data-act="timerStart" title="Start rest timer">⏱</button></div>
+      <div class="eyebrow">${esc(d.programName)} · started ${fmtTime(d.startedAt)}</div><h1>${esc(d.dayName)}</h1>`;
+    h += d.entries.map((e, ei) => entryCard(e, ei, a, rests)).join('');
+    h += `<div id="finish-area"><label class="field"><span>Session notes</span><textarea data-in="notes" rows="3" placeholder="How did it feel?">${esc(d.notes)}</textarea></label>
       <div class="row gap"><button class="btn danger" data-act="discard">Discard</button>
-      <button class="btn primary grow" data-act="finish">Finish &amp; save</button></div>`;
+      <button class="btn primary grow" data-act="finish">Finish &amp; save</button></div></div>`;
     return h;
   },
 
@@ -221,10 +229,12 @@ const VIEWS = {
     if (!s) return `<p class="muted">Workout not found.</p>`;
     let h = `<button class="link" data-act="back">‹ Back</button>
       <div class="eyebrow">${fmtDateY(s.date)} · ${fmtTime(s.date)}</div><h1>${esc(s.dayName)}</h1>`;
+    const rests = restMap(s.entries);
     h += s.entries.map(e => {
       const best = e.sets.filter(x => x.type !== 'warmup').reduce((b, x) => Math.max(b, Calc.e1rm(x.kg, x.reps) || 0), 0);
       return `<div class="card"><div class="h3">${e.superset ? `<span class="pill ss">${esc(e.superset)}</span> ` : ''}${esc(e.name)}</div>
-        <div class="chips">${e.sets.map(x => `<span class="chip t-${x.type}">${TYPE[x.type]?.short || ''} ${fmtKg(x.kg)}×${x.reps ?? '—'}</span>`).join('')}</div>
+        <div class="chips">${e.sets.map(x => { const r = x.at ? rests.get(x.at) : null;
+          return `<span class="chip t-${x.type} ${x.failed ? 'fail' : ''}">${x.failed ? '✗ ' : ''}${TYPE[x.type]?.short || ''} ${fmtKg(x.kg)}×${x.reps ?? '—'}${r != null ? ` <span class="muted">· ${mmss(r)}</span>` : ''}</span>`; }).join('')}</div>
         ${e.maxKey && best ? `<div class="muted small">Best e1RM: ${fmtKg(Math.round(best * 2) / 2)} kg</div>` : ''}</div>`;
     }).join('');
     if (s.notes) h += `<div class="card"><div class="eyebrow">Notes</div>${esc(s.notes)}</div>`;
@@ -390,39 +400,75 @@ const VIEWS = {
 };
 
 // ---------- workout pieces ----------
-function entryCard(e, ei) {
+// Index of the "active" exercise: first one (not skipped) with a set still to do
+const activeIdx = d => d.entries.findIndex(e => !e.skipped && e.sets.some(s => !s.done));
+const isCollapsed = e => e.collapsed === true || (e.collapsed !== false && e.sets.length > 0 && e.sets.every(s => s.done));
+
+// Rest before each completed set = time since the previous completed set (any exercise)
+function restMap(entries) {
+  const ats = [];
+  entries.forEach(e => e.sets.forEach(s => { if (s.at) ats.push(s.at); }));
+  ats.sort();
+  const m = new Map();
+  ats.forEach((t, i) => { if (i > 0) m.set(t, (new Date(t) - new Date(ats[i - 1])) / 1000); });
+  return m;
+}
+
+function entryCard(e, ei, active, rests) {
   const max = maxOf(e.maxKey);
   const done = e.sets.filter(s => s.done).length;
-  const head = `<div class="row"><div class="h3">${e.superset ? `<span class="pill ss">${esc(e.superset)}</span> ` : ''}${esc(e.name)}
+  const unfinished = !e.skipped && e.sets.some(s => !s.done);
+  const collapsed = !e.skipped && isCollapsed(e);
+  const head = `<div class="row ex-head" data-act="toggleEx" data-e="${ei}">
+      <div class="h3">${e.superset ? `<span class="pill ss">${esc(e.superset)}</span> ` : ''}${esc(e.name)}
       ${e.perSide ? '<span class="pill">per side</span>' : ''}${e.optional ? '<span class="pill">optional</span>' : ''}</div>
-      <div class="muted small nowrap">${done}/${e.sets.length}</div></div>`;
+      <div class="row nowrap"><span class="muted small">${done}/${e.sets.length}</span>${e.skipped ? '' : `<span class="tgl">${collapsed ? '+' : '−'}</span>`}</div></div>`;
   if (e.skipped) return `<div class="card ex skipped">${head}<div class="row"><span class="muted small">Skipped</span>
       <button class="btn sm" data-act="skip" data-e="${ei}">Undo</button></div></div>`;
+  if (collapsed) {
+    return `<div class="card ex collapsed ${ei === active ? 'active' : ''}">${head}
+      <div class="chips">${e.sets.map(s => `<span class="chip t-${s.type} ${s.failed ? 'fail' : ''} ${s.done ? '' : 'todo'}">${s.failed ? '✗ ' : ''}${fmtKg(s.kg)}×${s.reps ?? '—'}</span>`).join('')}</div></div>`;
+  }
   const meta = [];
   if (e.maxKey) meta.push(`${esc(e.maxKey)} 1RM: ${max ? fmtKg(max) + ' kg' : '<button class="link inline" data-act="nav" data-v="maxes">not set</button>'}`);
   meta.push(e.prevDate ? `Last time: ${fmtDate(e.prevDate)}` : 'First time logging');
   const counters = {};
+  const firstTodo = ei === active ? e.sets.findIndex(s => !s.done) : -1;
   const rows = e.sets.map((s, si) => {
     counters[s.type] = (counters[s.type] || 0) + 1;
     const prev = s.prevKg != null || s.prevReps != null ? `Last: ${fmtKg(s.prevKg)}×${s.prevReps ?? '—'}` : '';
-    return `<div class="set t-${s.type} ${s.done ? 'done' : ''}" data-e="${ei}" data-s="${si}">
+    let stamp = '';
+    if (s.done && s.at) {
+      const r = rests.get(s.at);
+      const short = r != null && s.type !== 'warmup' && r < S.settings.restSec;
+      stamp = `<div class="set-stamp">${s.failed ? '✗ Failed' : '✓ Done'} ${fmtTime(s.at)}${r != null ? ` · <span class="${short ? 'short' : ''}">rest ${mmss(r)}${short ? ' ⚠️' : ''}</span>` : ''}</div>`;
+    }
+    const repeat = s.offerRepeat ? `<div class="repeat"><span>Failed — repeat this set?</span>
+        <button class="btn sm primary" data-act="repeatSet">Repeat</button><button class="btn sm" data-act="noRepeat">No</button></div>` : '';
+    return `<div class="set t-${s.type} ${s.done ? 'done' : ''} ${s.failed ? 'failed' : ''} ${si === firstTodo ? 'active' : ''}" ${si === firstTodo ? 'id="active-set"' : ''} data-e="${ei}" data-s="${si}">
       <div class="set-top"><span class="tag">${TYPE[s.type]?.short || ''}${counters[s.type]}</span>
         <span class="set-target">${targetText(s.target)}</span><span class="set-prev">${prev}</span></div>
       <div class="set-inputs">
         <label class="inp"><input inputmode="decimal" data-in="kg" value="${s.kg ?? ''}" placeholder="kg"><span>kg</span></label>
         <span class="x">×</span>
-        <label class="inp"><input inputmode="numeric" data-in="reps" value="${s.reps ?? ''}" placeholder="${s.target.reps ?? ''}"><span>reps</span></label>
-        <button class="tick" data-act="tick" aria-label="Done">${s.done ? '✓' : ''}</button>
+        <label class="inp"><input inputmode="numeric" data-in="reps" value="${s.reps ?? ''}" placeholder="${s.done ? '?' : (s.target.reps ?? '')}"><span>reps</span></label>
+        ${s.done ? '' : `<button class="failbtn" data-act="fail" aria-label="Failed">✗</button>`}
+        <button class="tick" data-act="tick" aria-label="${s.done ? 'Undo' : 'Done'}">${s.failed ? '✗' : s.done ? '✓' : ''}</button>
       </div>
+      ${stamp}${repeat}
       <div class="set-hint">${hintHtml(e, s)}</div></div>`;
   }).join('');
-  return `<div class="card ex">${head}
+  const order = ei === active
+    ? `<button class="btn sm ghost" data-act="later" data-e="${ei}">↓ Later</button>`
+    : unfinished ? `<button class="btn sm ghost" data-act="doNext" data-e="${ei}">▶ Do next</button>` : '';
+  return `<div class="card ex ${ei === active ? 'active' : ''}" id="ex-${ei}">${head}
     ${e.notes ? `<div class="cue">${esc(e.notes)}</div>` : ''}
     <div class="muted small">${meta.join(' · ')}</div>
     ${rows}
-    <div class="row gap left ex-foot"><button class="btn sm" data-act="addSet" data-e="${ei}">+ Set</button>
+    <div class="row gap left wrap ex-foot"><button class="btn sm" data-act="addSet" data-e="${ei}">+ Set</button>
       <button class="btn sm" data-act="removeSet" data-e="${ei}">− Set</button>
-      <button class="btn sm ghost" data-act="skip" data-e="${ei}">Skip exercise</button></div></div>`;
+      ${order}
+      <button class="btn sm ghost" data-act="skip" data-e="${ei}">Skip</button></div></div>`;
 }
 
 // AMRAP / top-set helper: reps needed to "match" the current 1RM, plus live estimated 1RM
@@ -467,6 +513,9 @@ const Timer = {
   tick() {
     const el = $('#elapsed');
     if (el && S.draft) el.textContent = mmss((Date.now() - new Date(S.draft.startedAt)) / 1000);
+    const since = $('#since');
+    if (since && S.draft) { let last = null; S.draft.entries.forEach(e => e.sets.forEach(s => { if (s.at && (!last || s.at > last)) last = s.at; }));
+      since.textContent = last ? mmss((Date.now() - new Date(last)) / 1000) : '—'; }
     const bar = $('#timerbar');
     if (!this.end) { bar.hidden = true; return; }
     const left = (this.end - Date.now()) / 1000;
@@ -511,13 +560,13 @@ function download(name, text, type) {
 async function markBackedUp() { S.settings.lastBackup = new Date().toISOString(); await save.settings(); }
 function toCsv() {
   const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  const lines = [['date', 'program', 'day', 'exercise', 'set_no', 'type', 'target_kg', 'target_reps', 'kg', 'reps', 'e1rm'].join(',')];
-  [...S.sessions].reverse().forEach(s => s.entries.forEach(e => e.sets.forEach((x, n) => {
+  const lines = [['date', 'program', 'day', 'exercise', 'set_no', 'type', 'target_kg', 'target_reps', 'kg', 'reps', 'e1rm', 'failed', 'completed_at', 'rest_sec'].join(',')];
+  [...S.sessions].reverse().forEach(s => { const rests = restMap(s.entries); s.entries.forEach(e => e.sets.forEach((x, n) => {
     const t = x.target || {};
     const e1 = x.type !== 'warmup' ? Calc.e1rm(x.kg, x.reps) : null;
     lines.push([s.date.slice(0, 10), s.programName, s.dayName, e.name, n + 1, x.type, t.kg ?? '',
-      (t.reps ?? '') + (t.repsMax ? '-' + t.repsMax : '') + (t.amrap ? '+' : ''), x.kg ?? '', x.reps ?? '', e1 ? e1.toFixed(1) : ''].map(q).join(','));
-  })));
+      (t.reps ?? '') + (t.repsMax ? '-' + t.repsMax : '') + (t.amrap ? '+' : ''), x.kg ?? '', x.reps ?? '', e1 ? e1.toFixed(1) : '', x.failed ? 'yes' : '', x.at || '', x.at && rests.has(x.at) ? Math.round(rests.get(x.at)) : ''].map(q).join(','));
+  })); });
   return lines.join('\n');
 }
 async function importBackup(file) {
@@ -559,17 +608,62 @@ const ACT = {
     save.draft(); go('workout');
   },
   tick(el) {
-    const { s } = curSet(el);
-    s.done = !s.done;
-    if (s.done) {
-      if (s.reps == null) s.reps = s.target.reps;
-      if (S.settings.autoRest) Timer.start();
+    const { e, s } = curSet(el);
+    if (s.done) { // undo
+      s.done = false; s.failed = false; s.at = null; s.offerRepeat = false;
+      save.draft(); rerender(); return;
     }
+    s.done = true; s.failed = false; s.at = new Date().toISOString();
+    if (s.reps == null) s.reps = s.target.reps;
+    if (S.settings.autoRest) Timer.start();
+    save.draft();
+    const finishedEx = e.sets.every(x => x.done);
+    rerender();
+    if (finishedEx) ACT.jumpNext();
+  },
+  fail(el) {
+    const { s } = curSet(el);
+    s.done = true; s.failed = true; s.at = new Date().toISOString(); s.offerRepeat = true;
+    if (S.settings.autoRest) Timer.start();
     save.draft(); rerender();
+    if (s.reps == null) toast('Enter the reps you got in the reps box');
+  },
+  repeatSet(el) {
+    const { e, s } = curSet(el);
+    const si = e.sets.indexOf(s);
+    s.offerRepeat = false;
+    e.sets.splice(si + 1, 0, { ...clone(s), done: false, failed: false, at: null, reps: null, offerRepeat: false, prevKg: null, prevReps: null });
+    save.draft(); rerender();
+  },
+  noRepeat(el) { curSet(el).s.offerRepeat = false; save.draft(); rerender(); },
+  toggleEx(el) {
+    const e = S.draft.entries[+el.dataset.e];
+    if (e.skipped) return;
+    e.collapsed = !isCollapsed(e); save.draft(); rerender();
+  },
+  jumpNext() {
+    const t = $('#active-set') || $('#finish-area');
+    if (t) t.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  },
+  doNext(el) {
+    const d = S.draft, ei = +el.dataset.e, a = activeIdx(d);
+    if (a < 0 || ei === a) return;
+    const [x] = d.entries.splice(ei, 1);
+    x.collapsed = false;
+    d.entries.splice(a, 0, x);
+    save.draft(); rerender(); ACT.jumpNext();
+  },
+  later(el) {
+    const d = S.draft, ei = +el.dataset.e;
+    const j = d.entries.findIndex((e, i) => i > ei && !e.skipped && e.sets.some(s => !s.done));
+    if (j < 0) { toast('No other exercises left to swap with'); return; }
+    const [x] = d.entries.splice(ei, 1);
+    d.entries.splice(j, 0, x); // lands right after the exercise that was next
+    save.draft(); rerender(); ACT.jumpNext();
   },
   addSet(el) {
     const e = S.draft.entries[+el.dataset.e], last = e.sets[e.sets.length - 1];
-    const n = last ? { ...clone(last), done: false, reps: null, prevKg: null, prevReps: null }
+    const n = last ? { ...clone(last), done: false, failed: false, at: null, offerRepeat: false, reps: null, prevKg: null, prevReps: null }
       : { type: 'working', target: { kg: null, pct: null, reps: 10, repsMax: null, amrap: false, rir: null }, kg: null, reps: null, done: false };
     e.sets.push(n); save.draft(); rerender();
   },
@@ -591,7 +685,7 @@ const ACT = {
     const d = S.draft;
     const entries = d.entries.filter(e => !e.skipped).map(e => ({
       exId: e.exId, name: e.name, maxKey: e.maxKey, superset: e.superset, perSide: e.perSide,
-      sets: e.sets.map((x, i) => ({ i, type: x.type, target: x.target, kg: x.kg, reps: x.reps, done: x.done }))
+      sets: e.sets.map((x, i) => ({ i, type: x.type, target: x.target, kg: x.kg, reps: x.reps, done: x.done, at: x.at || null, failed: !!x.failed }))
         .filter(x => x.done).map(({ done, ...rest }) => rest),
     })).filter(e => e.sets.length);
     if (!entries.length) { alert('No sets ticked yet — tick ✓ on the sets you completed.'); return; }
